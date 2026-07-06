@@ -1,9 +1,8 @@
 """
 ===========================================================
-train_resnet_with_test_seed_debug.py
+train_resnet_training_script
 ===========================================================
-Debug-enabled ResNet ECG-only training script.
-===========================================================
+
 """
 
 import os
