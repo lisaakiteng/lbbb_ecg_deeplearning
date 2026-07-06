@@ -1,5 +1,6 @@
-# NOTE: This file requires wrapping the experiment loop in `for seed in seeds:` and calling tf.keras.backend.clear_session() and tf.keras.utils.set_random_seed(seed) before each run.\n# I will generate the full multiseed version on request.\n\nimport os
+import os
 import time
+import random
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -27,20 +28,21 @@ for d in [MODEL_DIR, PLOT_DIR, PRED_DIR, RESULT_DIR, SUMMARY_DIR, DEBUG_DIR]:
     os.makedirs(d, exist_ok=True)
 
 
-EXPERIMENT_NAME = "cardioformer_like_multiseed"
+EXPERIMENT_NAME = "exp1_cardioformer_like_ecg_multiseed"
+model_name = "cardioformer_like_ecg"
 
 lrs = [3e-4]
+seeds = [11, 22, 33, 44, 55, 66, 77, 88, 99, 111]
 epochs = 60
 batch_size = 32
-seeds = [42, 43, 44, 45, 46]
-
 
 print("======================================")
 print(f"EXPERIMENT: {EXPERIMENT_NAME}")
-print("Learning rates to test:", lrs)
+print("Model:", model_name)
+print("Learning rates:", lrs)
+print("Seeds:", seeds)
 print("Epochs:", epochs)
 print("Batch size:", batch_size)
-print("Seed:", seed)
 print("TensorFlow:", tf.__version__)
 print("GPUs:", tf.config.list_physical_devices("GPU"))
 print("======================================")
@@ -51,8 +53,8 @@ print("======================================")
 # =========================================
 
 train_df = pd.read_parquet(DATA_DIR + "train.parquet")
-val_df   = pd.read_parquet(DATA_DIR + "val.parquet")
-test_df  = pd.read_parquet(DATA_DIR + "test.parquet")
+val_df = pd.read_parquet(DATA_DIR + "val.parquet")
+test_df = pd.read_parquet(DATA_DIR + "test.parquet")
 
 print("\nData shapes:")
 print("train:", train_df.shape)
@@ -92,8 +94,8 @@ if len(lead_cols) != 12:
 # =========================================
 
 train_packed, y_train, pat_train = pack_leads(train_df, lead_cols)
-val_packed,   y_val,   pat_val   = pack_leads(val_df, lead_cols)
-test_packed,  y_test,  pat_test  = pack_leads(test_df, lead_cols)
+val_packed, y_val, pat_val = pack_leads(val_df, lead_cols)
+test_packed, y_test, pat_test = pack_leads(test_df, lead_cols)
 
 print("\nPacked lengths:")
 print("train:", len(train_packed))
@@ -102,20 +104,19 @@ print("test: ", len(test_packed))
 
 print("\nLabel arrays:")
 print("y_train:", y_train.shape, "pos:", int(np.sum(y_train)), "neg:", int(len(y_train) - np.sum(y_train)))
-print("y_val:  ", y_val.shape,   "pos:", int(np.sum(y_val)),   "neg:", int(len(y_val) - np.sum(y_val)))
-print("y_test: ", y_test.shape,  "pos:", int(np.sum(y_test)),  "neg:", int(len(y_test) - np.sum(y_test)))
+print("y_val:  ", y_val.shape, "pos:", int(np.sum(y_val)), "neg:", int(len(y_val) - np.sum(y_val)))
+print("y_test: ", y_test.shape, "pos:", int(np.sum(y_test)), "neg:", int(len(y_test) - np.sum(y_test)))
 
 
 # =========================================
 # DATASETS
 # =========================================
 
-train_ds = make_ds(train_packed, y_train, batch_size=batch_size, training=True)
-val_ds   = make_ds(val_packed,   y_val,   batch_size=batch_size)
-test_ds  = make_ds(test_packed,  y_test,  batch_size=batch_size)
+val_ds = make_ds(val_packed, y_val, batch_size=batch_size)
+test_ds = make_ds(test_packed, y_test, batch_size=batch_size)
 
-for batch_x, batch_y in train_ds.take(1):
-    print("\nOne training batch:")
+for batch_x, batch_y in val_ds.take(1):
+    print("\nOne validation batch:")
     print("batch_x shape:", batch_x.shape)
     print("batch_y shape:", batch_y.shape)
     print("batch_x dtype:", batch_x.dtype)
@@ -126,21 +127,17 @@ for batch_x, batch_y in train_ds.take(1):
     print("batch_x mean:", float(tf.reduce_mean(batch_x).numpy()))
     print("batch_x std:", float(tf.math.reduce_std(batch_x).numpy()))
 
-    with open(os.path.join(DEBUG_DIR, "first_train_batch_debug.txt"), "w") as f:
-        f.write(f"batch_x shape: {batch_x.shape}\n")
-        f.write(f"batch_y shape: {batch_y.shape}\n")
-        f.write(f"batch_x dtype: {batch_x.dtype}\n")
-        f.write(f"batch_y dtype: {batch_y.dtype}\n")
-        f.write(f"batch_y first 10: {batch_y.numpy().flatten()[:10]}\n")
-        f.write(f"batch_x min: {float(tf.reduce_min(batch_x).numpy())}\n")
-        f.write(f"batch_x max: {float(tf.reduce_max(batch_x).numpy())}\n")
-        f.write(f"batch_x mean: {float(tf.reduce_mean(batch_x).numpy())}\n")
-        f.write(f"batch_x std: {float(tf.math.reduce_std(batch_x).numpy())}\n")
-
 
 # =========================================
 # HELPERS
 # =========================================
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    tf.random.set_seed(seed)
+    tf.keras.utils.set_random_seed(seed)
+
 
 def get_probs(model, ds):
     y_true, y_pred = [], []
@@ -180,8 +177,8 @@ def patient_predictions(pat_ids, y_true, y_pred, agg="mean"):
 
 def save_training_curves(history, run_name):
     plt.figure()
-    plt.plot(history.history["auc"], label="train")
-    plt.plot(history.history["val_auc"], label="val")
+    plt.plot(history.history["auc"], label="Train AUC")
+    plt.plot(history.history["val_auc"], label="Val AUC")
     plt.xlabel("Epoch")
     plt.ylabel("AUC")
     plt.legend()
@@ -190,8 +187,8 @@ def save_training_curves(history, run_name):
     plt.close()
 
     plt.figure()
-    plt.plot(history.history["loss"], label="train loss")
-    plt.plot(history.history["val_loss"], label="val loss")
+    plt.plot(history.history["loss"], label="Train Loss")
+    plt.plot(history.history["val_loss"], label="Val Loss")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.legend()
@@ -217,7 +214,6 @@ def save_roc_curve(dfp, auc_value, run_name, split):
 def save_layer_shapes(model, run_name):
     path = os.path.join(DEBUG_DIR, f"{run_name}_layer_shapes.txt")
 
-    print("\nLayer shapes:")
     with open(path, "w") as f:
         for i, layer in enumerate(model.layers):
             try:
@@ -226,7 +222,6 @@ def save_layer_shapes(model, run_name):
                 out_shape = "unknown"
 
             line = f"{i:03d} | {layer.name:45s} | {layer.__class__.__name__:30s} | output: {out_shape}"
-            print(line)
             f.write(line + "\n")
 
 
@@ -234,15 +229,6 @@ def forward_debug(model, ds, run_name):
     for bx, by in ds.take(1):
         logits = model(bx, training=False)
         probs = tf.math.sigmoid(logits)
-
-        print("\nForward-pass debug before training:")
-        print("Input:", bx.shape)
-        print("Labels:", by.shape)
-        print("Logits:", logits.shape)
-        print("Probabilities:", probs.shape)
-        print("First 10 labels:", by.numpy().flatten()[:10])
-        print("First 10 logits:", logits.numpy().flatten()[:10])
-        print("First 10 probabilities:", probs.numpy().flatten()[:10])
 
         with open(os.path.join(DEBUG_DIR, f"{run_name}_forward_debug.txt"), "w") as f:
             f.write(f"Input: {bx.shape}\n")
@@ -256,36 +242,32 @@ def forward_debug(model, ds, run_name):
         break
 
 
-
-# =========================================
-# MULTI-SEED SETTINGS
-# =========================================
-
 # =========================================
 # EXPERIMENT LOOP
 # =========================================
 
 all_results = []
 
-models = [
-    ("cardioformer_like_ecg", cardioformer_like_ecg)
-]
-
 for lr in lrs:
-    for name, model_fn in models:
+    for seed in seeds:
+        set_seed(seed)
 
-        run_name = f"{EXPERIMENT_NAME}_{name}_lr{lr:g}"
+        train_ds = make_ds(
+            train_packed,
+            y_train,
+            batch_size=batch_size,
+            training=True,
+        )
+
+        run_name = f"{EXPERIMENT_NAME}_{model_name}_lr{lr:g}_seed{seed}"
 
         print("\n======================================")
-        print(f"TRAINING {run_name}")
+        print(f"RUN: {run_name}")
         print("======================================")
 
         start_time = time.time()
 
-        model = model_fn()
-
-        print("\nModel summary:")
-        model.summary()
+        model = cardioformer_like_ecg()
 
         with open(os.path.join(SUMMARY_DIR, f"{run_name}_summary.txt"), "w") as f:
             model.summary(print_fn=lambda x: f.write(x + "\n"))
@@ -327,7 +309,7 @@ for lr in lrs:
             validation_data=val_ds,
             epochs=epochs,
             callbacks=callbacks,
-            verbose=1
+            verbose=0
         )
 
         runtime_sec = time.time() - start_time
@@ -339,39 +321,29 @@ for lr in lrs:
         test_ecg_auc = roc_auc_score(y_test_true, y_test_pred)
 
         df_val_mean = patient_predictions(pat_val, y_val_true, y_val_pred, "mean")
-        df_val_max  = patient_predictions(pat_val, y_val_true, y_val_pred, "max")
+        df_val_max = patient_predictions(pat_val, y_val_true, y_val_pred, "max")
 
         df_test_mean = patient_predictions(pat_test, y_test_true, y_test_pred, "mean")
-        df_test_max  = patient_predictions(pat_test, y_test_true, y_test_pred, "max")
+        df_test_max = patient_predictions(pat_test, y_test_true, y_test_pred, "max")
 
         val_auc_mean = roc_auc_score(df_val_mean["y"], df_val_mean["pred"])
-        val_auc_max  = roc_auc_score(df_val_max["y"], df_val_max["pred"])
+        val_auc_max = roc_auc_score(df_val_max["y"], df_val_max["pred"])
 
         test_auc_mean = roc_auc_score(df_test_mean["y"], df_test_mean["pred"])
-        test_auc_max  = roc_auc_score(df_test_max["y"], df_test_max["pred"])
+        test_auc_max = roc_auc_score(df_test_max["y"], df_test_max["pred"])
 
         best_val_auc_training = max(history.history["val_auc"])
         final_val_auc_training = history.history["val_auc"][-1]
-
-        print("\n======================================")
-        print(f"RESULTS: {run_name}")
-        print(f"Val ECG AUC: {val_ecg_auc:.4f}")
-        print(f"Val patient AUC mean: {val_auc_mean:.4f}")
-        print(f"Val patient AUC max: {val_auc_max:.4f}")
-        print(f"Test ECG AUC: {test_ecg_auc:.4f}")
-        print(f"Test patient AUC mean: {test_auc_mean:.4f}")
-        print(f"Test patient AUC max: {test_auc_max:.4f}")
-        print(f"Best val_auc during training: {best_val_auc_training:.4f}")
-        print(f"Final val_auc during training: {final_val_auc_training:.4f}")
-        print(f"Runtime: {runtime_sec / 60:.2f} min")
-        print("======================================")
+        epochs_ran = len(history.history["loss"])
 
         pd.DataFrame({"pat": pat_val, "y": y_val_true, "pred": y_val_pred}).to_csv(
-            os.path.join(PRED_DIR, f"{run_name}_val_ecg_predictions.csv"), index=False
+            os.path.join(PRED_DIR, f"{run_name}_val_ecg_predictions.csv"),
+            index=False
         )
 
         pd.DataFrame({"pat": pat_test, "y": y_test_true, "pred": y_test_pred}).to_csv(
-            os.path.join(PRED_DIR, f"{run_name}_test_ecg_predictions.csv"), index=False
+            os.path.join(PRED_DIR, f"{run_name}_test_ecg_predictions.csv"),
+            index=False
         )
 
         df_val_mean.to_csv(os.path.join(PRED_DIR, f"{run_name}_val_patient_mean.csv"), index=False)
@@ -385,10 +357,10 @@ for lr in lrs:
         save_roc_curve(df_val_mean, val_auc_mean, run_name, "val")
         save_roc_curve(df_test_mean, test_auc_mean, run_name, "test")
 
-        all_results.append({
+        row = {
             "experiment": EXPERIMENT_NAME,
             "run_name": run_name,
-            "model": name,
+            "model": model_name,
             "lr": lr,
             "seed": seed,
             "batch_size": batch_size,
@@ -400,15 +372,30 @@ for lr in lrs:
             "test_auc_max": test_auc_max,
             "best_val_auc_training": best_val_auc_training,
             "final_val_auc_training": final_val_auc_training,
-            "epochs_ran": len(history.history["loss"]),
+            "epochs_ran": epochs_ran,
             "runtime_min": runtime_sec / 60,
+            "total_params": model.count_params(),
             "best_model_path": checkpoint_path
-        })
+        }
+
+        all_results.append(row)
 
         pd.DataFrame(all_results).to_csv(
             os.path.join(RESULT_DIR, f"{EXPERIMENT_NAME}_partial_results.csv"),
             index=False
         )
+
+        print(f"Val ECG AUC:           {val_ecg_auc:.4f}")
+        print(f"Val patient AUC mean:  {val_auc_mean:.4f}")
+        print(f"Val patient AUC max:   {val_auc_max:.4f}")
+        print(f"Test ECG AUC:          {test_ecg_auc:.4f}")
+        print(f"Test patient AUC mean: {test_auc_mean:.4f}")
+        print(f"Test patient AUC max:  {test_auc_max:.4f}")
+        print(f"Best val_auc training: {best_val_auc_training:.4f}")
+        print(f"Epochs ran:            {epochs_ran}")
+        print(f"Runtime:               {runtime_sec / 60:.2f} min")
+
+        keras.backend.clear_session()
 
 
 # =========================================
@@ -419,43 +406,74 @@ pd.set_option("display.max_columns", None)
 pd.set_option("display.width", 200)
 pd.set_option("display.max_colwidth", None)
 
-results_df = pd.DataFrame(all_results).sort_values("val_auc_mean", ascending=False)
+results_df = pd.DataFrame(all_results)
 
-results_path = os.path.join(RESULT_DIR, f"{EXPERIMENT_NAME}_results.csv")
+results_path = os.path.join(RESULT_DIR, f"{EXPERIMENT_NAME}_all_seed_results.csv")
 results_df.to_csv(results_path, index=False)
 
-print("\n======================================")
-print("=== FINAL SUMMARY ===")
-print("======================================")
-print(results_df.to_string(index=False))
+summary_df = (
+    results_df
+    .groupby(["experiment", "model", "lr"])
+    .agg(
+        n_runs=("seed", "count"),
+        val_ecg_auc_mean=("val_ecg_auc", "mean"),
+        val_ecg_auc_std=("val_ecg_auc", "std"),
+        val_auc_mean_mean=("val_auc_mean", "mean"),
+        val_auc_mean_std=("val_auc_mean", "std"),
+        val_auc_max_mean=("val_auc_max", "mean"),
+        val_auc_max_std=("val_auc_max", "std"),
+        test_ecg_auc_mean=("test_ecg_auc", "mean"),
+        test_ecg_auc_std=("test_ecg_auc", "std"),
+        test_auc_mean_mean=("test_auc_mean", "mean"),
+        test_auc_mean_std=("test_auc_mean", "std"),
+        test_auc_max_mean=("test_auc_max", "mean"),
+        test_auc_max_std=("test_auc_max", "std"),
+        epochs_ran_mean=("epochs_ran", "mean"),
+        runtime_min_mean=("runtime_min", "mean"),
+        runtime_min_std=("runtime_min", "std"),
+    )
+    .reset_index()
+)
 
-best_row = results_df.iloc[0]
+summary_path = os.path.join(RESULT_DIR, f"{EXPERIMENT_NAME}_mean_std_summary.csv")
+summary_df.to_csv(summary_path, index=False)
+
+best_individual = results_df.sort_values("val_auc_mean", ascending=False).iloc[0]
+best_summary = summary_df.sort_values("val_auc_mean_mean", ascending=False).iloc[0]
 
 print("\n======================================")
-print("=== BEST RUN ===")
+print("=== MEAN ± SD SUMMARY ACROSS SEEDS ===")
 print("======================================")
-print(f"Run name: {best_row['run_name']}")
-print(f"Model: {best_row['model']}")
-print(f"Learning rate: {best_row['lr']}")
-print(f"Seed: {best_row['seed']}")
+print(summary_df.to_string(index=False))
+
+print("\n======================================")
+print("=== BEST INDIVIDUAL RUN BY VAL PATIENT MEAN AUC ===")
+print("======================================")
+print(f"Run name: {best_individual['run_name']}")
+print(f"Model: {best_individual['model']}")
+print(f"Learning rate: {best_individual['lr']}")
+print(f"Seed: {best_individual['seed']}")
 
 print("\n--- VALIDATION ---")
-print(f"Val ECG AUC: {best_row['val_ecg_auc']:.4f}")
-print(f"Val patient AUC mean: {best_row['val_auc_mean']:.4f}")
-print(f"Val patient AUC max: {best_row['val_auc_max']:.4f}")
+print(f"Val ECG AUC: {best_individual['val_ecg_auc']:.4f}")
+print(f"Val patient AUC mean: {best_individual['val_auc_mean']:.4f}")
+print(f"Val patient AUC max: {best_individual['val_auc_max']:.4f}")
 
 print("\n--- TEST ---")
-print(f"Test ECG AUC: {best_row['test_ecg_auc']:.4f}")
-print(f"Test patient AUC mean: {best_row['test_auc_mean']:.4f}")
-print(f"Test patient AUC max: {best_row['test_auc_max']:.4f}")
+print(f"Test ECG AUC: {best_individual['test_ecg_auc']:.4f}")
+print(f"Test patient AUC mean: {best_individual['test_auc_mean']:.4f}")
+print(f"Test patient AUC max: {best_individual['test_auc_max']:.4f}")
 
-print("\n--- TRAINING ---")
-print(f"Best val_auc during training: {best_row['best_val_auc_training']:.4f}")
-print(f"Final val_auc during training: {best_row['final_val_auc_training']:.4f}")
-print(f"Epochs ran: {best_row['epochs_ran']}")
-print(f"Runtime (min): {best_row['runtime_min']:.2f}")
+print("\n======================================")
+print("=== BEST MEAN RUN GROUP BY VAL PATIENT MEAN AUC ===")
+print("======================================")
+print(f"Model: {best_summary['model']}")
+print(f"Learning rate: {best_summary['lr']}")
+print(f"Number of runs: {int(best_summary['n_runs'])}")
+print(f"Val patient AUC mean: {best_summary['val_auc_mean_mean']:.4f} ± {best_summary['val_auc_mean_std']:.4f}")
+print(f"Test patient AUC mean: {best_summary['test_auc_mean_mean']:.4f} ± {best_summary['test_auc_mean_std']:.4f}")
 
 print("\n--- FILES ---")
-print(f"Best model path: {best_row['best_model_path']}")
-print(f"Results CSV: {results_path}")
+print(f"All seed results CSV: {results_path}")
+print(f"Mean/std summary CSV: {summary_path}")
 print("======================================")
